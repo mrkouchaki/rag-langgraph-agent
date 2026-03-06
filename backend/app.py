@@ -3,11 +3,15 @@ from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
 
+load_dotenv()
+from backend.config import TAVILY_API_KEY 
 from backend.agent import run
 
-load_dotenv()
+
 app = FastAPI(title="LangGraph RAG Agent API")
 
+
+print("TAVILY_API_KEY present?", bool(TAVILY_API_KEY), "len=", len(TAVILY_API_KEY))
 class QuestionRequest(BaseModel):
     question: str
     max_steps: int = 6
