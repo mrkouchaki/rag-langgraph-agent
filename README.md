@@ -131,10 +131,10 @@ pip install -r ui/requirements.txt
 
 ### 2 Environment Variables
 
-Copy the example environment file.
+Create an example environment file.
 
 ```
-cp .env.example .env
+vim .env.example .env
 ```
 
 Example `.env`
