@@ -1,6 +1,6 @@
 # rag-langgraph-agent
 
-# RAG LangGraph Research Agent (Chroma + Tools)
+# RAG LangGraph Research Agent (Chroma + Tavily Tool)
 
 A production-style Retrieval Augmented Generation (RAG) agent built with **LangGraph**, **LangChain**, **ChromaDB**, and **tool routing**.
 
