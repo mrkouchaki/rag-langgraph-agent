@@ -18,6 +18,7 @@ def ask_agent(req: QuestionRequest):
         answer = run(req.question, max_steps=req.max_steps)
         return {"question": req.question, "answer": answer}
     except Exception as e:
+        print("ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
