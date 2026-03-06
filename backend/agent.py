@@ -178,61 +178,93 @@ def _kb_hits_are_weak(messages: List[Any]) -> bool:
 # ----------------------------
 # Node 0: KB-first enforced (NO LLM needed)
 # ----------------------------
+# def kb_first_node(state: AgentState) -> Dict[str, Any]:
+#     question = _extract_last_user_question(state["messages"])
+#     if not question:
+#         return {}
+
+#     hits = kb_query_tool.invoke({"query": question, "top_k": 3})
+
+#     # Put KB results into the messages as a tool message so the LLM sees them
+#     return {
+#         "messages": [
+#             ToolMessage(
+#                 tool_call_id=f"kb_{uuid.uuid4().hex[:8]}",
+#                 content=json.dumps(hits),
+#             )
+#         ]
+#     }
+
 def kb_first_node(state: AgentState) -> Dict[str, Any]:
     question = _extract_last_user_question(state["messages"])
     if not question:
         return {}
 
     hits = kb_query_tool.invoke({"query": question, "top_k": 3})
-
-    # Put KB results into the messages as a tool message so the LLM sees them
     return {
         "messages": [
-            ToolMessage(
-                tool_call_id=f"kb_{uuid.uuid4().hex[:8]}",
-                content=json.dumps(hits),
-            )
+            SystemMessage(content="KB hits (JSON):\n" + json.dumps(hits))
         ]
     }
 
 # ----------------------------
 # Node 1: Agent (LLM)
 # ----------------------------
+# def agent_node(state: AgentState) -> Dict[str, Any]:
+#     msgs = state["messages"]
+
+#     # Provide a short hint based on KB quality (helps the model behave)
+#     weak = _kb_hits_are_weak(msgs)
+#     hint = (
+#         "KB hits look WEAK. You should call search_web_tool."
+#         if weak
+#         else "KB hits look STRONG. Answer using KB; do NOT call web search."
+#     )
+
+#     prompt_msgs = [SystemMessage(content=SYSTEM_PROMPT + "\n\n" + hint)] + msgs
+#     ai = llm_with_tools.invoke(prompt_msgs)
+
+#     # --- QWEN XML tool_call fix (your original patch, kept) ---
+#     if "<tool_call>" in (ai.content or "") and not getattr(ai, "tool_calls", None):
+#         try:
+#             content = ai.content
+#             start = content.find("<tool_call>") + len("<tool_call>")
+#             end = content.find("</tool_call>")
+#             json_str = content[start:end].strip()
+#             tool_data = json.loads(json_str)
+
+#             ai.tool_calls = [
+#                 {
+#                     "name": tool_data["name"],
+#                     "args": tool_data["arguments"],
+#                     "id": f"call_{uuid.uuid4().hex[:8]}",
+#                 }
+#             ]
+#             ai.content = ""
+#         except Exception as e:
+#             print(f"XML Parsing failed: {e}")
+#     # ----------------------------------------------------------
+
+#     return {"messages": [ai]}
+
 def agent_node(state: AgentState) -> Dict[str, Any]:
     msgs = state["messages"]
 
-    # Provide a short hint based on KB quality (helps the model behave)
-    weak = _kb_hits_are_weak(msgs)
+    tavily_allowed = state["tavily_calls"] < TAVILY_MAX_SEARCH_CALLS_PER_RUN
+    tools_allowed = [kb_query_tool, kb_save_tool] + ([search_web_tool] if tavily_allowed else [])
+
+    llm_local = llm.bind_tools(tools_allowed)
+
     hint = (
         "KB hits look WEAK. You should call search_web_tool."
-        if weak
-        else "KB hits look STRONG. Answer using KB; do NOT call web search."
+        if _kb_hits_are_weak(msgs) and tavily_allowed
+        else "Answer using KB. Web search is unavailable or not needed."
     )
 
     prompt_msgs = [SystemMessage(content=SYSTEM_PROMPT + "\n\n" + hint)] + msgs
-    ai = llm_with_tools.invoke(prompt_msgs)
+    ai = llm_local.invoke(prompt_msgs)
 
-    # --- QWEN XML tool_call fix (your original patch, kept) ---
-    if "<tool_call>" in (ai.content or "") and not getattr(ai, "tool_calls", None):
-        try:
-            content = ai.content
-            start = content.find("<tool_call>") + len("<tool_call>")
-            end = content.find("</tool_call>")
-            json_str = content[start:end].strip()
-            tool_data = json.loads(json_str)
-
-            ai.tool_calls = [
-                {
-                    "name": tool_data["name"],
-                    "args": tool_data["arguments"],
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                }
-            ]
-            ai.content = ""
-        except Exception as e:
-            print(f"XML Parsing failed: {e}")
-    # ----------------------------------------------------------
-
+    # keep your Qwen XML patch here if needed...
     return {"messages": [ai]}
 
 # ----------------------------
@@ -264,9 +296,15 @@ def maybe_block_tavily(state: AgentState) -> Dict[str, Any]:
 
     return updates
 
+# def route_after_guard(state: AgentState):
+#     if state.get("blocked"):
+#         return "agent"  # allow LLM to continue with injected tool output
+#     last = state["messages"][-1]
+#     if getattr(last, "tool_calls", None):
+#         return "tools"
+#     return END
+
 def route_after_guard(state: AgentState):
-    if state.get("blocked"):
-        return "agent"  # allow LLM to continue with injected tool output
     last = state["messages"][-1]
     if getattr(last, "tool_calls", None):
         return "tools"
